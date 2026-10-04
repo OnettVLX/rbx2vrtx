@@ -22,18 +22,23 @@ save, so it stays valid.
 import argparse, json, os, re, struct, sys
 import zstandard as zstd
 
-# Built-in template (a blank Vortex save), so no --template file is needed.
-TEMPLATE_B64 = (
-    "VlJUWAUotS/9AFgNEQBGVlZDIFGcMbmANQH0XkOAOnTZHn1iLV+IpH2uTRIGht1C3SBLFe2Fsya9"
-    "6aHK2KCtfJMiO2S78X3OYNXWKQcOIYQMAejLFEMAPABEAJ6A/yKdq8XtbfC+YOjJuEGA/yDvfMIt"
-    "oRNqrv/zGLwZNEGLDz5eILtoF85nyb7Kl30aiCDDcDAaZgNWLpZbyTjasRmSzznnf44AicM2GpFo"
-    "6udIu/q5/1bGP+dHDPcFRc2Hws3eyH/JQRaup9N467u9yf+QcNTY2znUoKfxqHEVwIUWJrraUEND"
-    "pRFoqKjJXjNqV2N8nk4iNhQKhYVQP2L2xb/17Tz+Szrm/FYqdUiQWTYyoZ+Sfyb0c+RTeF9PxqBr"
-    "AxwDUWbbnMixrWB4WOHihoO5AAcXarUUqCAxdDaDyF6VYkfYEilKElVRcllhAMVi5VgxVmmp6TSF"
-    "/QemAY78ZaKyqCHqVR/IPCFhQQRsoJFYUaZEmqRQWNYwA5pJ0wFrACK/mmcGHNXNnzElYfeDYX49"
-    "recgnbjyyaISsT14yMeZ5jVMadocgcSSlX5ozoSx9DjT/QamlJtzeMx8hkpzS8+aiVgpGXQCKyGD"
-    "SsQmZFAJ2L2sKRXs92lipz/XmshQSK3aKxlc0HrXlzkVHr55Q5gB3Haf6hF4bOKTE+49pmg1CN/G"
-    "SOCjg4JYaSMkad2Q+B8pT+iaBTvOTfxm+x76l+0g63/NNnz6y3bqnEzrrob1BA=="
+# Built-in template (a blank Vortex save, stored as hex text), so no --template file is needed.
+TEMPLATE_HEX = (
+    "565254580528b52ffd00580d11004656564320519c31b9803501f45e43803a74d91e7d622d5f"
+    "88a47dae4d120686dd42dd204b15ed85b326bde9a1cad8a0ad7c93223b64bbf17dce60d5d629"
+    "070e21840c01e8cb1443003c0044009e80ff229dabc5ed6df0be60e8c9b84180ff20ef7cc22d"
+    "a1136aaefff318bc1934418b0f3e5e20bb6817ce67c9beca977d1a8820c370301a6603562e96"
+    "5bc938dab11992cf39e77f8e0089c3361a9168eae748bbfab9ff56c63fe7470cf70545cd87c2"
+    "cddec87fc94116aea7d378ebbbbdc9ff9070d4d8db39d4a0a7f1a87115c0851626bada504343"
+    "a51168a8a8c95e336a57637c9e4e2236140a8585503f62f6c5bff5ed3cfe4b3ae6fc562a7548"
+    "90593632a19f927f26f473e453785f4fc6a06b031c035166db9cc8b1ad607858e1e28683b900"
+    "07176ab514a82031743683c85e956247d812294a12555172596100c562e558315669a9e93485"
+    "fd07a6018efc65a2b2a821ea551fc83c216141046ca0915851a6449aa45058d630039a49d301"
+    "6b0022bf9a67061cd5cd9f312561f783617e3dade7209db8f2c9a212b13d78c8c799e6354c69"
+    "da1c81c492957e68ce84b1f438d3fd06a6949b7378cc7c864a734bcf9a8958291974022b2183"
+    "4ac426645009d8bdac2915ecf76962a73fd79ac85048adda2b195cd07ad79739151ebe794398"
+    "01dc769fea11786ce29313ee3da6683508dfc648e0a383825869232469dd90f81f294fe89a05"
+    "3bce4dfc66fb1efa97ed20eb7fcd367cfacb76ea9c4cebae86f504"
 )
 
 MAGIC = b"VRTX"
@@ -57,8 +62,7 @@ SHAPE_CODE = {"Block": 0, "Wedge": 1, "CornerWedge": 2, "Cylinder": 3, "Ball": 4
 
 def read_vrtx(path):
     if path is None:
-        import base64
-        d = base64.b64decode("".join(TEMPLATE_B64))
+        d = bytes.fromhex("".join(TEMPLATE_HEX))
     else:
         d = open(path, "rb").read()
     assert d[:4] == MAGIC, "not a .vrtx file"
@@ -204,18 +208,17 @@ def load_rbxlx(path, include_baseplate=False):
 
 
 def desktop_dir():
-    """The user's real Desktop folder (handles OneDrive-redirected desktops on Windows)."""
-    try:
-        if os.name == "nt":
-            import ctypes
-            buf = ctypes.create_unicode_buffer(260)
-            # CSIDL_DESKTOPDIRECTORY = 0x10
-            if ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buf) == 0 and buf.value:
-                return buf.value
-    except Exception:
-        pass
-    d = os.path.join(os.path.expanduser("~"), "Desktop")
-    return d if os.path.isdir(d) else None
+    """The user's Desktop folder (also checks OneDrive-redirected desktops). None if not found."""
+    home = os.path.expanduser("~")
+    candidates = [os.path.join(home, "Desktop")]
+    for var in ("OneDrive", "OneDriveConsumer"):
+        if os.environ.get(var):
+            candidates.append(os.path.join(os.environ[var], "Desktop"))
+    candidates.append(os.path.join(home, "OneDrive", "Desktop"))
+    for d in candidates:
+        if os.path.isdir(d):
+            return d
+    return None
 
 
 # ---- Luau compatibility fixes for old Roblox scripts -------------------------------------------
